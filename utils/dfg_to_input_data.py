@@ -1,36 +1,31 @@
 import torch
 from torch_geometric.data import Data
 
-def dfg_to_graph_matcher_format(dfg):
-    """
-    Convert a Data Flow Graph to the format expected by GraphMatcher.
+def dfg_to_graph_data(dfg):
+    # Bước 1: Tạo ánh xạ từ tên biến sang chỉ mục nút
+    node_map = {}
+    for edge in dfg:
+        if edge[2] not in node_map:
+            node_map[edge[2]] = len(node_map)
+        if edge[4] not in node_map:
+            node_map[edge[4]] = len(node_map)
     
-    :param dfg: A dictionary representation of the DFG where keys are node IDs
-                and values are dictionaries containing 'type' and 'edges'.
-                'edges' is a list of target node IDs.
-    :return: A PyTorch Geometric Data object
-    """
-    # Create a mapping of node types to integers
-    node_types = set(node['type'] for node in dfg.values())
-    type_to_idx = {t: i for i, t in enumerate(node_types)}
+    # Bước 2: Xây dựng tensor đặc trưng nút
+    num_nodes = len(node_map)
+    x = torch.zeros(num_nodes, 1)  # Đặc trưng đơn giản, can mở rộng
     
-    # Create node features
-    x = torch.zeros((len(dfg), len(type_to_idx)))
-    for i, (_, node) in enumerate(dfg.items()):
-        x[i, type_to_idx[node['type']]] = 1
-    
-    # Create edge index
+    # Bước 3: Tạo tensor chỉ mục cạnh
     edge_index = []
-    for source, node in dfg.items():
-        for target in node['edges']:
-            edge_index.append([int(source), int(target)])
+    for edge in dfg:
+        source = node_map[edge[4]]
+        target = node_map[edge[2]]
+        edge_index.append([source, target])
     edge_index = torch.tensor(edge_index).t().contiguous()
     
-    # Create edge attributes (if needed)
-    # For this example, we'll use a simple edge weight of 1 for all edges
-    edge_attr = torch.ones(edge_index.size(1), 1)
+    # Bước 4: Tạo tensor đặc trưng cạnh (tùy chọn)
+    edge_attr = torch.zeros(edge_index.size(1), 1)  # Đặc trưng đơn giản
     
-    # Create the PyTorch Geometric Data object
+    # Tạo đối tượng Data của PyTorch Geometric
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     
     return data
