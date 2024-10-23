@@ -1,6 +1,9 @@
 import torch
 from torch_geometric.data import Data
 
+import torch
+from torch_geometric.data import Data
+
 def dfg_to_graph_data(dfg):
     # Bước 1: Tạo ánh xạ từ tên biến sang chỉ mục nút
     node_map = {}
@@ -12,7 +15,7 @@ def dfg_to_graph_data(dfg):
     
     # Bước 2: Xây dựng tensor đặc trưng nút
     num_nodes = len(node_map)
-    x = torch.zeros(num_nodes, 1)  # Đặc trưng đơn giản, can mở rộng
+    x = torch.zeros(num_nodes, 1)  # Need to expand
     
     # Bước 3: Tạo tensor chỉ mục cạnh
     edge_index = []
@@ -23,7 +26,7 @@ def dfg_to_graph_data(dfg):
     edge_index = torch.tensor(edge_index).t().contiguous()
     
     # Bước 4: Tạo tensor đặc trưng cạnh (tùy chọn)
-    edge_attr = torch.zeros(edge_index.size(1), 1)  # Đặc trưng đơn giản
+    edge_attr = torch.zeros(edge_index.size(1), 1)  #Need to expand
     
     # Tạo đối tượng Data của PyTorch Geometric
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)

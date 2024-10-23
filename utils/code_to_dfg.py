@@ -27,7 +27,7 @@ for language in dfg_function:
     parsers[language] = parser
 
 ##########-----REMOVE_COMMENT_CONVERT_TO_DFG
-def etract_data_flow_graph(code, parser, lang):
+def extract_data_flow_graph(code, parser, lang):
     try:
         code = remove_comments_and_docstrings(code, lang)
     except:
