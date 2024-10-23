@@ -9,34 +9,22 @@ class InputFeatures(object):
     """A single training/test features for a example."""
 
     def __init__(self,
-                 input_tokens_1,
-                 input_ids_1,
-                 position_idx_1,
-                 dfg_to_code_1,
-                 dfg_to_dfg_1,
-                 input_tokens_2,
-                 input_ids_2,
-                 position_idx_2,
-                 dfg_to_code_2,
-                 dfg_to_dfg_2,
-                 label,
                  url1,
-                 url2
+                 dfg1,
+                 graph_data1,
+                 url2,
+                 dfg2,
+                 graph_data2,
+                 label
                  ):
 
         # The first code function
-        self.input_tokens_1 = input_tokens_1
-        self.input_ids_1 = input_ids_1
-        self.position_idx_1 = position_idx_1
-        self.dfg_to_code_1 = dfg_to_code_1
-        self.dfg_to_dfg_1 = dfg_to_dfg_1
+        self.dfg1 = dfg1
+        self.graph_data1 = graph_data1
 
         # The second code function
-        self.input_tokens_2 = input_tokens_2
-        self.input_ids_2 = input_ids_2
-        self.position_idx_2 = position_idx_2
-        self.dfg_to_code_2 = dfg_to_code_2
-        self.dfg_to_dfg_2 = dfg_to_dfg_2
+        self.dfg2 = dfg2
+        self.graph_data2 = graph_data2
 
         # label
         self.label = label
@@ -62,51 +50,18 @@ def convert_examples_to_features(item):
 
             # extract data flow
             dfg = extract_data_flow_graph(func, parser, 'java')
-            code_tokens = [tokenizer.tokenize(
-                '@ '+x)[1:] if idx != 0 else tokenizer.tokenize(x) for idx, x in enumerate(code_tokens)]
-            ori2cur_pos = {}
-            ori2cur_pos[-1] = (0, 0)
-            for i in range(len(code_tokens)):
-                ori2cur_pos[i] = (ori2cur_pos[i-1][1],
-                                  ori2cur_pos[i-1][1]+len(code_tokens[i]))
-            code_tokens = [y for x in code_tokens for y in x]
 
-            # truncating
-            code_tokens = code_tokens[:args.code_length+args.data_flow_length -
-                                      3-min(len(dfg), args.data_flow_length)][:512-3]
-            source_tokens = [tokenizer.cls_token] + \
-                code_tokens+[tokenizer.sep_token]
-            source_ids = tokenizer.convert_tokens_to_ids(source_tokens)
-            position_idx = [i+tokenizer.pad_token_id +
-                            1 for i in range(len(source_tokens))]
-            dfg = dfg[:args.code_length +
-                      args.data_flow_length-len(source_tokens)]
-            source_tokens += [x[0] for x in dfg]
-            position_idx += [0 for x in dfg]
-            source_ids += [tokenizer.unk_token_id for x in dfg]
-            padding_length = args.code_length + \
-                args.data_flow_length-len(source_ids)
-            position_idx += [tokenizer.pad_token_id]*padding_length
-            source_ids += [tokenizer.pad_token_id]*padding_length
+            # convert to PyTorch Geometric Data
+            graph_data = dfg_to_graph_data(dfg)
 
-            # reindex
-            reverse_index = {}
-            for idx, x in enumerate(dfg):
-                reverse_index[x[1]] = idx
-            for idx, x in enumerate(dfg):
-                dfg[idx] = x[:-1]+([reverse_index[i]
-                                   for i in x[-1] if i in reverse_index],)
-            dfg_to_dfg = [x[-1] for x in dfg]
-            dfg_to_code = [ori2cur_pos[x[1]] for x in dfg]
-            length = len([tokenizer.cls_token])
-            dfg_to_code = [(x[0]+length, x[1]+length) for x in dfg_to_code]
-            cache[url] = source_tokens, source_ids, position_idx, dfg_to_code, dfg_to_dfg
+            cache[url] = dfg, graph_data
 
-    source_tokens_1, source_ids_1, position_idx_1, dfg_to_code_1, dfg_to_dfg_1 = cache[url1]
-    source_tokens_2, source_ids_2, position_idx_2, dfg_to_code_2, dfg_to_dfg_2 = cache[url2]
-    return InputFeatures(source_tokens_1, source_ids_1, position_idx_1, dfg_to_code_1, dfg_to_dfg_1,
-                         source_tokens_2, source_ids_2, position_idx_2, dfg_to_code_2, dfg_to_dfg_2,
-                         label, url1, url2)
+    dfg1, graph_data1 = cache[url1]
+    dfg2, graph_data2 = cache[url2]
+    return InputFeatures(url1, dfg1, graph_data1,
+                         url2, dfg2, graph_data2,
+                         label
+                        )
 
 import torch
 import numpy as np
@@ -120,7 +75,7 @@ import matplotlib.pyplot as plt
 torch.cuda.empty_cache()
 
 class TextDataset(Dataset):
-    def __init__(self, tokenizer, args, file_path='train'):
+    def __init__(self, args, file_path='dataset'):
         self.examples = []
         self.args = args
         index_filename = file_path
@@ -148,7 +103,7 @@ class TextDataset(Dataset):
                 label = int(label)
                 # Check if label is one of the four classes
                 if label in [0, 1, 2, 3]:
-                    data.append((url1, url2, label, tokenizer,
+                    data.append((url1, url2, label,
                                 args, cache, url_to_code))
                 else:
                     logger.error("Invalid label: %s", label)
@@ -255,7 +210,105 @@ def set_seed(args):
 
 ##########-----Train_Stage
 def train(args, train_dataset, matcher):
-    pass
+    
+    # build dataloader
+    train_sampler = RandomSampler(train_dataset)
+    train_dataloader = DataLoader(
+        train_dataset, sampler=train_sampler, batch_size=args.train_batch_size, num_workers=4)
+    print(f"len( train_dataloader): {len( train_dataloader)}")
+    args.max_steps = args.epochs*len(train_dataloader)
+    args.save_steps = len(train_dataloader)//10
+    args.warmup_steps = args.max_steps//5
+
+
+
+    # multi-gpu training
+    if args.n_gpu > 1:
+        model = torch.nn.DataParallel(model)
+
+    #Train
+    # Train!
+    logger.info("***** Running training *****")
+    logger.info("  Num examples = %d", len(train_dataset))
+    logger.info("  Num Epochs = %d", args.epochs)
+    logger.info("  Instantaneous batch size per GPU = %d",
+                args.train_batch_size//max(args.n_gpu, 1))
+    logger.info("  Total train batch size = %d",
+                args.train_batch_size*args.gradient_accumulation_steps)
+    logger.info("  Gradient Accumulation steps = %d",
+                args.gradient_accumulation_steps)
+    logger.info("  Total optimization steps = %d", args.max_steps)
+
+    global_step = 0
+    tr_loss, logging_loss, avg_loss, tr_nb, tr_num, train_loss = 0.0, 0.0, 0.0, 0, 0, 0
+    best_f1 = 0
+
+    model.zero_grad()
+
+    for idx in range(args.epochs):
+        bar = tqdm(train_dataloader, total=len(train_dataloader))
+        tr_num = 0
+        train_loss = 0
+        for step, batch in enumerate(bar):
+            (inputs_ids_1, position_idx_1, attn_mask_1,
+             inputs_ids_2, position_idx_2, attn_mask_2,
+             labels) = [x.to(args.device) for x in batch]
+            model.train()
+            loss, logits = model(inputs_ids_1, position_idx_1, attn_mask_1,
+                                 inputs_ids_2, position_idx_2, attn_mask_2, labels)
+
+            if args.n_gpu > 1:
+                loss = loss.mean()
+
+            if args.gradient_accumulation_steps > 1:
+                loss = loss / args.gradient_accumulation_steps
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(
+                model.parameters(), args.max_grad_norm)
+
+            tr_loss += loss.item()
+            tr_num += 1
+            train_loss += loss.item()
+            if avg_loss == 0:
+                avg_loss = tr_loss
+
+            avg_loss = round(train_loss/tr_num, 5)
+            bar.set_description("epoch {} loss {}".format(idx, avg_loss))
+
+            if (step + 1) % args.gradient_accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+                scheduler.step()
+                global_step += 1
+                output_flag = True
+                avg_loss = round(
+                    np.exp((tr_loss - logging_loss) / (global_step - tr_nb)), 4)
+
+                if global_step % args.save_steps == 0:
+                    results = evaluate(args, model, tokenizer,
+                                       eval_when_training=True)
+
+                    # Save model checkpoint
+                    if results['eval_f1'] > best_f1:
+                        best_f1 = results['eval_f1']
+                        logger.info("  "+"*"*20)
+                        logger.info("  Best f1:%s", round(best_f1, 4))
+                        logger.info("  "+"*"*20)
+
+                        checkpoint_prefix = 'checkpoint-best-f1'
+                        output_dir = os.path.join(
+                            args.output_dir, '{}'.format(checkpoint_prefix))
+                        if not os.path.exists(output_dir):
+                            os.makedirs(output_dir)
+                        model_to_save = model.module if hasattr(
+                            model, 'module') else model
+                        output_dir = os.path.join(
+                            output_dir, '{}'.format('model.bin'))
+                        torch.save(model_to_save.state_dict(), output_dir)
+                        logger.info(
+                            "Saving model checkpoint to %s", output_dir)
+
 
 ##########-----Evaluate_Stage
 def evaluate(args, dataset, matcher):
