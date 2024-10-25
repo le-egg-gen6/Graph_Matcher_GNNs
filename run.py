@@ -41,7 +41,7 @@ from .utils.dfg_to_input_data import (
 
 def convert_examples_to_features(item):
     # source
-    url1, url2, label, tokenizer, args, cache, url_to_code = item
+    url1, url2, label, args, cache, url_to_code = item
     parser = parsers['java']
 
     for url in [url1, url2]:
