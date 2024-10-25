@@ -36,7 +36,14 @@ from .utils.code_to_dfg import (
     extract_data_flow_graph
 )
 from .utils.dfg_to_input_data import (
-    dfg_to_graph_data
+    dfg_to_graph_data,
+    batch_dfg_to_pyg,
+    create_graph_matcher_input
+)
+
+from .utils.tokenizer_utils import (
+    initialize_pretrained_tokenizer_and_model,
+    get_code_token_embeddings
 )
 
 def convert_examples_to_features(item):
