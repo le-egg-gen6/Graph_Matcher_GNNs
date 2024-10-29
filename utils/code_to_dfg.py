@@ -63,7 +63,7 @@ def extract_data_flow_graph(code, parser, lang):
         dfg = new_DFG
     except:
         dfg = []
-    return dfg
+    return dfg, code_tokens
 
 
 

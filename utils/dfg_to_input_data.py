@@ -4,7 +4,7 @@ from torch_geometric.data import Data
 import torch
 from torch_geometric.data import Data
 
-def dfg_to_graph_data(dfg, code_tokens, code_token_embeds):
+def dfg_to_graph_data(dfg, code_tokens, code_token_embeds = None):
     """
     Convert a Data Flow Graph to PyTorch Geometric Data format.
     
