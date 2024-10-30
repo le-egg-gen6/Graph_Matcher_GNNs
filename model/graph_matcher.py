@@ -9,40 +9,19 @@
 # Distributed under terms of the MIT License
 
 import torch
+import torch.nn as nn
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU
 from torch_geometric.utils import to_dense_batch, to_dense_adj
+from ..utils.processing_utils import (
+    masked_softmax,
+    reset,
+    to_dense,
+    to_sparse
+)
 
 __all__ = ['GraphMatcher']
 
-######################################### UTILS ############################
-def masked_softmax(src, mask, dim=-1):
-    out = src.masked_fill(~mask, float('-inf'))
-    out = torch.softmax(out, dim=dim)
-    out = out.masked_fill(~mask, 0)
-    return out
-
-def to_sparse(x, mask):
-    return x[mask]
-
-def to_dense(x, mask):
-    out = x.new_zeros(tuple(mask.size()) + (x.size(-1), ))
-    out[mask] = x
-    return out
-
-def reset(nn):
-    def _reset(item):
-        if hasattr(item, 'reset_parameters'):
-            item.reset_parameters()
-
-    if nn is not None:
-        if hasattr(nn, 'children') and len(list(nn.children())) > 0:
-            for item in nn.children():
-                _reset(item)
-        else:
-            _reset(nn)
-######################################### END UTILS #########################
-
-class GraphMatcher(torch.nn.Module):
+class GraphMatcher(nn.Module):
     r"""
     The *Graph Matcher* module which first matches nodes
     locally via a graph neural network :math:`\Psi_{\theta_1}`, and then

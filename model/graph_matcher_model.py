@@ -1,4 +1,4 @@
-from graph_matcher_core import GraphMatcher
+from model.graph_matcher import GraphMatcher
 
 import torch.nn as nn
 from torch_geometric.nn import GCNConv, global_mean_pool
