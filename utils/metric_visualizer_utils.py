@@ -138,51 +138,51 @@ def plot_comparative_metrics(metrics_list, labels, figsize=(15, 5), save_path=No
     
     return fig
 
-# Create sample metrics data
-def create_sample_metrics(n_steps=1000, noise_level=0.2):
-    steps = np.arange(n_steps)
+# # Create sample metrics data
+# def create_sample_metrics(n_steps=1000, noise_level=0.2):
+#     steps = np.arange(n_steps)
     
-    # Generate decreasing loss with noise
-    base_loss = 2 * np.exp(-steps / 300) + 0.5
-    noise = np.random.normal(0, noise_level, n_steps)
-    losses = base_loss + noise
-    losses = np.abs(losses)  # Ensure losses are positive
+#     # Generate decreasing loss with noise
+#     base_loss = 2 * np.exp(-steps / 300) + 0.5
+#     noise = np.random.normal(0, noise_level, n_steps)
+#     losses = base_loss + noise
+#     losses = np.abs(losses)  # Ensure losses are positive
     
-    # Generate learning rate with step decay
-    lr_base = 0.01
-    lr_history = lr_base * np.power(0.1, steps // 300)
+#     # Generate learning rate with step decay
+#     lr_base = 0.01
+#     lr_history = lr_base * np.power(0.1, steps // 300)
     
-    # Calculate epoch losses (assuming 100 steps per epoch)
-    n_epochs = n_steps // 100
-    epoch_losses = [np.mean(losses[i*100:(i+1)*100]) for i in range(n_epochs)]
+#     # Calculate epoch losses (assuming 100 steps per epoch)
+#     n_epochs = n_steps // 100
+#     epoch_losses = [np.mean(losses[i*100:(i+1)*100]) for i in range(n_epochs)]
     
-    return {
-        'metrics': {
-            'step': steps,
-            'loss': losses,
-            'learning_rate': lr_history
-        },
-        'lr_history': lr_history,
-        'epoch_losses': epoch_losses,
-        'losses': losses.tolist()
-    }
+#     return {
+#         'metrics': {
+#             'step': steps,
+#             'loss': losses,
+#             'learning_rate': lr_history
+#         },
+#         'lr_history': lr_history,
+#         'epoch_losses': epoch_losses,
+#         'losses': losses.tolist()
+#     }
 
-# Create sample data for single run
-metrics_single = create_sample_metrics(n_steps=1000, noise_level=0.2)
+# # Create sample data for single run
+# metrics_single = create_sample_metrics(n_steps=1000, noise_level=0.2)
 
-# Create sample data for multiple runs with different characteristics
-metrics_list = [
-    create_sample_metrics(n_steps=1000, noise_level=0.2),  # Normal training
-    create_sample_metrics(n_steps=1000, noise_level=0.4),  # More noisy training
-]
-labels = ['Normal Training', 'Noisy Training']
+# # Create sample data for multiple runs with different characteristics
+# metrics_list = [
+#     create_sample_metrics(n_steps=1000, noise_level=0.2),  # Normal training
+#     create_sample_metrics(n_steps=1000, noise_level=0.4),  # More noisy training
+# ]
+# labels = ['Normal Training', 'Noisy Training']
 
-# Plot single training run
-fig1 = plot_training_metrics(metrics_single, figsize=(15, 10))
-plt.show()
+# # Plot single training run
+# fig1 = plot_training_metrics(metrics_single, figsize=(15, 10))
+# plt.show()
 
-# Plot comparative metrics
-fig2 = plot_comparative_metrics(metrics_list, labels, figsize=(15, 5))
-plt.show()
+# # Plot comparative metrics
+# fig2 = plot_comparative_metrics(metrics_list, labels, figsize=(15, 5))
+# plt.show()
 
-create_sample_metrics()
+# create_sample_metrics()

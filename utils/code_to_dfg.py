@@ -1,6 +1,6 @@
 from tree_sitter import Language, Parser
-from ..parser import DFG_python, DFG_java, DFG_ruby, DFG_go, DFG_php, DFG_javascript
-from ..parser import (
+from parsers import DFG_python, DFG_java, DFG_ruby, DFG_go, DFG_php, DFG_javascript
+from parsers import (
     remove_comments_and_docstrings,
     index_to_code_token,
     tree_to_token_index
@@ -20,7 +20,7 @@ dfg_function = {
 ##########-----LOAD_DFG_PARSERS
 parsers = {}
 for language in dfg_function:
-    LANGUAGE = Language('parser/my-languages.so', language)
+    LANGUAGE = Language('parsers/my-languages.so', language)
     parser = Parser()
     parser.set_language(LANGUAGE)
     parser = [parser, dfg_function[language]]
@@ -28,14 +28,14 @@ for language in dfg_function:
 
 ##########-----REMOVE_COMMENT_CONVERT_TO_DFG
 def extract_data_flow_graph(code, parser, lang):
+    # remove comments
     try:
         code = remove_comments_and_docstrings(code, lang)
     except:
         pass
-    
+    # obtain dataflow
     if lang == "php":
         code = "<?php"+code+"?>"
-
     try:
         tree = parser[0].parse(bytes(code, 'utf8'))
         root_node = tree.root_node
@@ -61,9 +61,8 @@ def extract_data_flow_graph(code, parser, lang):
             if d[1] in indexs:
                 new_DFG.append(d)
         dfg = new_DFG
+        ret_code_tokens = code_tokens
     except:
         dfg = []
-    return dfg, code_tokens
-
-
-
+        ret_code_tokens = []
+    return dfg, ret_code_tokens

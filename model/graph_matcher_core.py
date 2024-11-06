@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU
 from torch_geometric.utils import to_dense_batch, to_dense_adj
-from ..utils.processing_utils import (
+from utils import (
     masked_softmax,
     reset,
     to_dense,
