@@ -1,40 +1,62 @@
 from model import (
-    CodeSimilarityDetectionModel,
-    CloneDetectionLoss
+    CodeCloneDetection
 )
 
-from parsers import (
-    DFG_python, DFG_java, DFG_ruby, DFG_go, DFG_php, DFG_javascript
+from utils import (
+    parsers
 )
 
-import os
 import torch
+from torch.utils.data import DataLoader, Dataset
+from torch.optim import Adam
+from torch.nn import CrossEntropyLoss, MSELoss
 import numpy as np
+import logging
+import os
 import json
 import random
-from torch.utils.data import DataLoader, Dataset, RandomSampler
-import torch.nn.functional as F
 from tqdm import tqdm
-import multiprocessing
-import argparse
-
 import logging
+
+import multiprocessing
 
 cpu_count = multiprocessing.cpu_count()
 
+# Cài đặt logging
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%m/%d/%Y %H:%M:%S',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
 torch.cuda.empty_cache()
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
+def collate_features(batch):
+    """
+    Custom collate function for InputFeature objects
+    Args:
+        batch: List of InputFeature objects
+    Returns:
+        Dictionary containing batched data
+    """
+    return {
+        'code1': [item.code1 for item in batch],
+        'code2': [item.code2 for item in batch],
+        'labels': torch.tensor([item.label for item in batch], dtype=torch.long),
+        'lang': [item.lang for item in batch]
+    }
+
 class InputFeature:
-    def __init__(self, code1, code2, label):
+    def __init__(self, code1, code2, label, lang="python"):
         self.code1 = code1
         self.code2 = code2
         self.label = label
+        self.lang = lang
 
-class TextDataset(Dataset):
+class CodePairDataset(Dataset):
     def __init__(self, args, file_path='dataset'):
         self.examples = []
         self.args = args
@@ -80,16 +102,15 @@ class TextDataset(Dataset):
                             example = InputFeature(
                                 code1=url_to_code[url1],
                                 code2=url_to_code[url2],
-                                label=label
+                                label=label,
+                                lang="java"  # Assuming Python, adjust if needed
                             )
                             self.examples.append(example)
                         else:
                             logger.warning(f"Skipping invalid label: {label}")
-                            
                     except ValueError:
                         logger.warning(f"Skipping malformed line: {line}")
                         continue
-                        
         except FileNotFoundError:
             raise FileNotFoundError(f"Index file not found: {file_path}")
             
@@ -110,344 +131,201 @@ class TextDataset(Dataset):
 
     def __len__(self):
         return len(self.examples)
-    
+        
     def __getitem__(self, idx):
         return self.examples[idx]
-    
-def collate_fn(batch):
-    """
-    Custom collate function for batching InputFeatures objects
-    Args:
-        batch: List of InputFeatures objects
-    Returns:
-        Dictionary containing batched tensors
-    """
-    # Lấy all code tokens và labels từ batch
-    code1_s = [item.code1 for item in batch]
-    code2_s = [item.code2 for item in batch]
-    labels = torch.tensor([item.label for item in batch], dtype=torch.long)
-    
-    return {
-        'code1_s': code1_s,
-        'code2_s': code2_s,
-        'labels': labels
-    }
 
-
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.n_gpu > 0:
-        torch.cuda.manual_seed_all(args.seed)
-
-def get_linear_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps, last_epoch=-1):
-    """
-    Create a schedule with a learning rate that decreases linearly from the initial lr after
-    a warmup period during which it increases linearly from 0 to the initial lr.
-    
-    Args:
-        optimizer: The optimizer for which to schedule the learning rate
-        num_warmup_steps: The number of steps for the warmup phase
-        num_training_steps: The total number of training steps
-        last_epoch: The index of the last epoch when resuming training
-    
-    Returns:
-        torch.optim.lr_scheduler.LambdaLR with the appropriate schedule
-    """
-    def lr_lambda(current_step: int):
-        # Warmup phase
-        if current_step < num_warmup_steps:
-            return float(current_step) / float(max(1, num_warmup_steps))
-        # Linear decay phase
-        return max(
-            0.0,
-            float(num_training_steps - current_step) / 
-            float(max(1, num_training_steps - num_warmup_steps))
+class CloneDetectionTrainer:
+    def __init__(
+        self,
+        model: CodeCloneDetection,
+        args,
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+    ):
+        self.device = device
+        self.model = model.to(self.device)
+        self.args = args
+        
+        self.optimizer = Adam(
+            self.model.parameters(),
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay
         )
+        
+        # Loss functions
+        self.similarity_loss = MSELoss()
+        self.clone_type_loss = CrossEntropyLoss()
+        
+    def train_epoch(
+        self,
+        train_loader: DataLoader,
+        epoch: int
+    ) -> dict:
+        self.model.train()
+        total_loss = 0
+        correct_predictions = 0
+        total_samples = 0
+        
+        progress_bar = tqdm(train_loader, desc=f'Epoch {epoch}')
+        
+        for batch_idx, batch in enumerate(progress_bar):
+            self.optimizer.zero_grad()
+            
+            batch_losses = []
+            batch_size = len(batch)
+            for i in range(batch_size):
+                similarity, attention, pred_type = self.model(
+                    code1=batch['code1'][i],
+                    code2=batch['code2'][i],
+                    lang=batch['lang'][i]
+                )
+                
+                # Chuyển tensors lên device
+                similarity = similarity.to(self.device)
+                attention = attention.to(self.device)
+                target_similarity = torch.tensor(1.0).to(self.device)
+                label = batch['labels'][i].to(self.device)
+                
+                # Calculate losses
+                sim_loss = self.similarity_loss(similarity, target_similarity)
+                
+                clone_logits = self.model.clone_classifier(
+                    torch.cat([similarity.unsqueeze(0), attention.mean(dim=0)])
+                )
+                type_loss = self.clone_type_loss(clone_logits.unsqueeze(0), label)
+                
+                total_loss = sim_loss + type_loss
+                batch_losses.append(total_loss)
+                
+                if pred_type == label.item():
+                    correct_predictions += 1
+                total_samples += 1
+                
+            # Calculate mean loss and backpropagate
+            loss = torch.stack(batch_losses).mean()
+            loss.backward()
+            
+            # Clip gradients
+            if self.args.max_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.args.max_grad_norm
+                )
+                
+            self.optimizer.step()
+            
+            progress_bar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'acc': f'{correct_predictions/total_samples:.4f}'
+            })
+            
+        return {
+            'loss': total_loss / len(train_loader),
+            'accuracy': correct_predictions / total_samples
+        }
 
-    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
-
-
-##########-----Train_Stage
-def train(args, train_dataset, model):
-    if args.n_gpu > 1:
-        model = torch.nn.DataParallel(model)
-    model.to(args.device)
+def train(args, model, train_dataset, eval_dataset):
+    """Main training function"""
     
-    # Initialize custom loss function with class weights if specified
-    class_weights = torch.tensor([1.0, 1.0, 1.0, 1.0]).to(args.device)  # Can be adjusted based on class distribution
-    criterion = CloneDetectionLoss(weights=class_weights)
-    
-    args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
-    train_sampler = RandomSampler(train_dataset)
-    train_dataloader = DataLoader(
-        train_dataset, 
-        sampler=train_sampler, 
+    # Create data loaders
+    train_loader = DataLoader(
+        train_dataset,
         batch_size=args.train_batch_size,
-        num_workers=cpu_count//2,
-        pin_memory=True,
-        collate_fn=collate_fn
+        shuffle=True,
+        num_workers=args.num_workers,
+        collate_fn=collate_features
     )
     
-    # Calculate total training steps
-    if args.max_steps > 0:
-        t_total = args.max_steps
-        args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
-    else:
-        t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.epochs
-
-    # Prepare optimizer and schedule
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 
-         'weight_decay': 0.0}
-    ]
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
-                                              num_training_steps=t_total)
-
-    # Training metrics tracking
-    metrics = {
-        'epoch': [],
-        'step': [],
-        'loss': [],
-        'learning_rate': [],
-        'avg_epoch_loss': []
-    }
-    
-    global_step = 0
-    tr_loss = 0.0
-    best_avg_loss = float('inf')
-    model.zero_grad()
-    
-    logger.info("***** Running training *****")
-    logger.info("  Num examples = %d", len(train_dataset))
-    logger.info("  Num Epochs = %d", args.epochs)
-    logger.info("  Batch size per device = %d", args.train_batch_size)
-    logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
-    logger.info("  Total optimization steps = %d", t_total)
-    
-    train_iterator = tqdm(range(int(args.epochs)), desc="Epoch")
-    
-    if args.n_gpu > 1:
-        model = torch.nn.DataParallel(model)
-    model.to(args.device)
-    
-    # Initialize custom loss function with class weights if specified
-    class_weights = torch.tensor([1.0, 1.0, 1.0, 1.0]).to(args.device)
-    criterion = CloneDetectionLoss(weights=class_weights)
-    
-    args.train_batch_size = args.train_batch_size // args.gradient_accumulation_steps
-    train_sampler = RandomSampler(train_dataset)
-    
-    # Sử dụng collate_fn tùy chỉnh trong DataLoader
-    train_dataloader = DataLoader(
-        train_dataset, 
-        sampler=train_sampler, 
-        batch_size=args.train_batch_size,
-        num_workers=cpu_count//2,
-        pin_memory=True,
-        collate_fn=collate_fn  # Thêm collate_fn vào đây
+    eval_loader = DataLoader(
+        eval_dataset,
+        batch_size=args.eval_batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        collate_fn=collate_features
     )
     
-    # Calculate total training steps
-    if args.max_steps > 0:
-        t_total = args.max_steps
-        args.num_train_epochs = args.max_steps // (len(train_dataloader) // args.gradient_accumulation_steps) + 1
-    else:
-        t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.epochs
-
-    # Prepare optimizer and schedule
-    no_decay = ['bias', 'LayerNorm.weight']
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 
-         'weight_decay': 0.0}
-    ]
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=args.warmup_steps,
-                                              num_training_steps=t_total)
+    # Initialize trainer
+    trainer = CloneDetectionTrainer(
+        model=model,
+        args=args,
+        device=args.device
+    )
     
     # Training loop
-    global_step = 0
-    tr_loss = 0.0
-    model.zero_grad()
-
-    # isLogged = False
+    best_eval_acc = 0
+    early_stopping_counter = 0
     
-    train_iterator = tqdm(range(int(args.epochs)), desc="Epoch")
-    for epoch in train_iterator:
-        epoch_iterator = tqdm(train_dataloader, desc="Training")
-        for step, batch in enumerate(epoch_iterator):
-            model.train()
-            try:
-                # Process code pairs
-                code1_s = batch['code1_s']
-                code2_s = batch['code2_s']
-                labels = batch['labels'].to(args.device)
-
-                # if not isLogged:
-                #     logger.info(str(code1_s[0]))
-                #     logger.info(str(code2_s[0]))
-                #     logger.info(labels[0])
-                #     isLogged = True
-                
-                # Forward pass
-                outputs = model(code1_s, code2_s)
-                loss = criterion(outputs, labels)
-                
-                if args.gradient_accumulation_steps > 1:
-                    loss = loss / args.gradient_accumulation_steps
-                
-                # Backward pass
-                loss.backward()
-                tr_loss += loss.item()
-                
-                if (step + 1) % args.gradient_accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
-                    optimizer.step()
-                    scheduler.step()
-                    model.zero_grad()
-                    global_step += 1
-                    
-                    epoch_iterator.set_description(f"Loss: {loss.item():.4f}")
-                    
-                    if args.evaluate_during_training and (global_step % args.eval_steps == 0):
-                        # Save checkpoint
-                        output_dir = os.path.join(args.output_dir, f'checkpoint-{global_step}')
-                        if not os.path.exists(output_dir):
-                            os.makedirs(output_dir)
-                        model_to_save = model.module if hasattr(model, 'module') else model
-                        torch.save(model_to_save.state_dict(), os.path.join(output_dir, 'model.pt'))
-                        
-            except Exception as e:
-                logger.error(f"Error in training step {step}: {str(e)}")
-                continue
-                
-            if args.max_steps > 0 and global_step > args.max_steps:
-                epoch_iterator.close()
-                break
-                
-        if args.max_steps > 0 and global_step > args.max_steps:
-            train_iterator.close()
+    for epoch in range(args.num_train_epochs):
+        # Train
+        train_metrics = trainer.train_epoch(train_loader, epoch)
+        
+        # Evaluate
+        eval_metrics = trainer.evaluate(eval_loader)
+        
+        # Logging
+        logger.info(f"Epoch {epoch+1}/{args.num_train_epochs}")
+        logger.info(f"Train Loss: {train_metrics['loss']:.4f}")
+        logger.info(f"Train Accuracy: {train_metrics['accuracy']:.4f}")
+        logger.info(f"Eval Loss: {eval_metrics['eval_loss']:.4f}")
+        logger.info(f"Eval Accuracy: {eval_metrics['eval_accuracy']:.4f}")
+        
+        # Save best model
+        if eval_metrics['eval_accuracy'] > best_eval_acc:
+            best_eval_acc = eval_metrics['eval_accuracy']
+            torch.save(
+                {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': trainer.optimizer.state_dict(),
+                    'best_acc': best_eval_acc,
+                },
+                os.path.join(args.output_dir, 'best_model.pt')
+            )
+            early_stopping_counter = 0
+        else:
+            early_stopping_counter += 1
+            
+        # Early stopping
+        if early_stopping_counter >= args.patience:
+            logger.info(f"Early stopping triggered after {epoch+1} epochs")
             break
-    
-    return global_step, tr_loss / global_step
+            
+    logger.info(f"Training finished. Best validation accuracy: {best_eval_acc:.4f}")
 
-##########-----Evaluate_Stage
-def evaluate(args, train_dataset, model, tokenizer=None, model_tokenizer=None, eval_during_training=False):
-    pass
-
-##########-----Test_Stage
-def test(args, train_dataset, model, tokenizer=None, model_tokenizer=None, thresh_hold=0):
-    pass
+class Args:
+    def __init__(self):
+        self.learning_rate = 1e-4
+        self.weight_decay = 1e-5
+        self.train_batch_size = 32
+        self.eval_batch_size = 32
+        self.num_train_epochs = 10
+        self.max_grad_norm = 1.0
+        self.num_workers = min(4, cpu_count)
+        self.output_dir = 'output'
+        self.patience = 3  # Early stopping patience
 
 def main():
-    parser = argparse.ArgumentParser()
+    args = Args()
     
-    # Required parameters
-    parser.add_argument("--train_data_file", default=None, type=str, required=True,
-                        help="The input training data file (a text file).")
-    parser.add_argument("--output_dir", default=None, type=str, required=True,
-                        help="The output directory for model checkpoints.")
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Model parameters
-    parser.add_argument("--model_name", default="microsoft/codebert-base", type=str,
-                        help="The pre-trained model name for code embeddings")
-    parser.add_argument("--input_dim", type=int, default=768,
-                        help="Input dimension for embeddings")
-    parser.add_argument("--hidden_dim", type=int, default=256,
-                        help="Hidden dimension for the model")
-    parser.add_argument("--embedding_dim", type=int, default=128,
-                        help="Output embedding dimension")
+    # Initialize datasets
+    train_dataset = CodePairDataset(args, file_path='dataset/train_100.txt') 
+    eval_dataset = CodePairDataset(args, file_path='dataset/train_100.txt')
     
-    # Training parameters
-    parser.add_argument("--do_train", action='store_true',
-                        help="Whether to run training.")
-    parser.add_argument("--do_eval", action='store_true',
-                        help="Whether to run evaluation.")
-    parser.add_argument("--train_batch_size", default=8, type=int,
-                        help="Batch size for training.")
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=1,
-                        help="Number of updates steps to accumulate before backward pass.")
-    parser.add_argument("--learning_rate", default=5e-5, type=float,
-                        help="Learning rate.")
-    parser.add_argument("--weight_decay", default=0.0, type=float,
-                        help="Weight decay for optimization.")
-    parser.add_argument("--adam_epsilon", default=1e-8, type=float,
-                        help="Epsilon for Adam optimizer.")
-    parser.add_argument("--max_grad_norm", default=1.0, type=float,
-                        help="Max gradient norm.")
-    parser.add_argument("--epochs", type=int, default=3,
-                        help="Number of training epochs.")
-    parser.add_argument("--warmup_steps", default=0, type=int,
-                        help="Linear warmup steps.")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Random seed.")
+    # Initialize model with device
+    model = CodeCloneDetection(
+        parsers=parsers,
+        hidden_channels=128,
+        out_channels=96,
+        device=device
+    )
     
-    # Evaluation parameters
-    parser.add_argument("--evaluate_during_training", action="store_true",
-                        help="Whether to evaluate during training.")
-    parser.add_argument("--eval_steps", type=int, default=1000,
-                        help="Evaluate every X steps during training.")
-    parser.add_argument("--max_steps", type=int, default=-1,
-                        help="If > 0: set total number of training steps. Override num_train_epochs.")
-    
-    args = parser.parse_args()
-    
-    # Setup device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    args.n_gpu = torch.cuda.device_count()
+    # Train
     args.device = device
+    train(args, model, train_dataset, eval_dataset)
     
-    # Setup logging
-    logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
-        datefmt='%m/%d/%Y %H:%M:%S',
-        level=logging.INFO
-    )
-    logger.info(f"Device: {device}, Number of GPUs: {args.n_gpu}")
-    
-    # Set seed
-    set_seed(args)
-    
-    # Initialize model
-    dfg_functions = {
-        "python" : DFG_python,
-        "java" : DFG_java,
-        "ruby" : DFG_ruby,
-        "go" : DFG_go,
-        "php" : DFG_php,
-        "javascript" : DFG_javascript
-    } 
-    model = CodeSimilarityDetectionModel(
-        dfg_functions=dfg_functions,
-        model_name=args.model_name,
-        input_dim=args.input_dim,
-        hidden_dim=args.hidden_dim,
-        embedding_dim=args.embedding_dim
-    )
-    
-    # Training
-    if args.do_train:
-        train_dataset = TextDataset(args, file_path=args.train_data_file)
-        global_step, tr_loss = train(args, train_dataset, model)
-        logger.info(f" Training completed: {global_step} steps, Average loss = {tr_loss}")
-        
-        # Save final model
-        if not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir)
-        model_to_save = model.module if hasattr(model, 'module') else model
-        torch.save(model_to_save.state_dict(), os.path.join(args.output_dir, 'final_model.pt'))
-        logger.info(f"Model saved to {args.output_dir}")
-    
-    # Evaluation
-    if args.do_eval:
-        logger.info("Evaluation not implemented yet")
 
 if __name__ == "__main__":
     main()

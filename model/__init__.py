@@ -1,5 +1,5 @@
 from .encoder import (
-    GNNEncoder
+    GraphEncoder
 )
 
 from .graph_matcher_core import (
@@ -7,14 +7,5 @@ from .graph_matcher_core import (
 )
 
 from .graph_matcher_model import (
-    GNNEncoder,
-    CodeSimilarityDetectionModel
-)
-
-from .code_to_graph import (
-    CodeToGraph
-)
-
-from .loss_optimizer import (
-    CloneDetectionLoss
+    CodeCloneDetection
 )

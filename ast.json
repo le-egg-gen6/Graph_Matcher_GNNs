@@ -1,0 +1,428 @@
+{
+    "type": "method_declaration",
+    "modifiers": [
+        {
+            "type": "modifier",
+            "value": "public"
+        },
+        {
+            "type": "modifier",
+            "value": "synchronized"
+        }
+    ],
+    "return_type": {
+        "type": "type_identifier",
+        "value": "String"
+    },
+    "name": {
+        "type": "identifier",
+        "value": "getSerialNumber"
+    },
+    "parameters": [],
+    "body": {
+        "type": "block",
+        "statements": [
+            {
+                "type": "if_statement",
+                "condition": {
+                    "type": "binary_expression",
+                    "operator": "!=",
+                    "left": {
+                        "type": "identifier",
+                        "value": "serialNum"
+                    },
+                    "right": {
+                        "type": "null_literal"
+                    }
+                },
+                "consequence": {
+                    "type": "return_statement",
+                    "expression": {
+                        "type": "identifier",
+                        "value": "serialNum"
+                    }
+                }
+            },
+            {
+                "type": "local_variable_declaration",
+                "modifier": "final",
+                "type": {
+                    "type": "type_identifier",
+                    "value": "StringBuffer"
+                },
+                "declarator": {
+                    "type": "variable_declarator",
+                    "name": "buf",
+                    "initializer": {
+                        "type": "object_creation_expression",
+                        "type": {
+                            "type": "type_identifier",
+                            "value": "StringBuffer"
+                        },
+                        "arguments": []
+                    }
+                }
+            },
+            {
+                "type": "local_variable_declaration",
+                "type": {
+                    "type": "type_identifier",
+                    "value": "Iterator"
+                },
+                "declarator": {
+                    "type": "variable_declarator",
+                    "name": "it",
+                    "initializer": {
+                        "type": "method_invocation",
+                        "object": {
+                            "type": "identifier",
+                            "value": "classpath"
+                        },
+                        "name": "iterator",
+                        "arguments": []
+                    }
+                }
+            },
+            {
+                "type": "while_statement",
+                "condition": {
+                    "type": "method_invocation",
+                    "object": {
+                        "type": "identifier",
+                        "value": "it"
+                    },
+                    "name": "hasNext",
+                    "arguments": []
+                },
+                "body": {
+                    "type": "block",
+                    "statements": [
+                        {
+                            "type": "local_variable_declaration",
+                            "type": {
+                                "type": "type_identifier",
+                                "value": "ClassPathEntry"
+                            },
+                            "declarator": {
+                                "type": "variable_declarator",
+                                "name": "entry",
+                                "initializer": {
+                                    "type": "cast_expression",
+                                    "type": {
+                                        "type": "type_identifier",
+                                        "value": "ClassPathEntry"
+                                    },
+                                    "expression": {
+                                        "type": "method_invocation",
+                                        "object": {
+                                            "type": "identifier",
+                                            "value": "it"
+                                        },
+                                        "name": "next",
+                                        "arguments": []
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "type": "expression_statement",
+                            "expression": {
+                                "type": "method_invocation",
+                                "object": {
+                                    "type": "identifier",
+                                    "value": "buf"
+                                },
+                                "name": "append",
+                                "arguments": [
+                                    {
+                                        "type": "method_invocation",
+                                        "object": {
+                                            "type": "method_invocation",
+                                            "object": {
+                                                "type": "identifier",
+                                                "value": "entry"
+                                            },
+                                            "name": "getResourceURL"
+                                        },
+                                        "name": "toString"
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "type": "expression_statement",
+                            "expression": {
+                                "type": "method_invocation",
+                                "object": {
+                                    "type": "identifier",
+                                    "value": "buf"
+                                },
+                                "name": "append",
+                                "arguments": [
+                                    {
+                                        "type": "string_literal",
+                                        "value": ":"
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "type": "expression_statement",
+                "expression": {
+                    "type": "assignment",
+                    "operator": "=",
+                    "left": {
+                        "type": "identifier",
+                        "value": "serialNum"
+                    },
+                    "right": {
+                        "type": "cast_expression",
+                        "type": {
+                            "type": "type_identifier",
+                            "value": "String"
+                        },
+                        "expression": {
+                            "type": "method_invocation",
+                            "object": {
+                                "type": "identifier",
+                                "value": "AccessController"
+                            },
+                            "name": "doPrivileged",
+                            "arguments": [
+                                {
+                                    "type": "object_creation_expression",
+                                    "type": {
+                                        "type": "type_identifier",
+                                        "value": "PrivilegedAction"
+                                    },
+                                    "body": {
+                                        "type": "class_body",
+                                        "declarations": [
+                                            {
+                                                "type": "method_declaration",
+                                                "modifiers": [
+                                                    {
+                                                        "type": "modifier",
+                                                        "value": "public"
+                                                    }
+                                                ],
+                                                "return_type": {
+                                                    "type": "type_identifier",
+                                                    "value": "Object"
+                                                },
+                                                "name": {
+                                                    "type": "identifier",
+                                                    "value": "run"
+                                                },
+                                                "parameters": [],
+                                                "body": {
+                                                    "type": "block",
+                                                    "statements": [
+                                                        {
+                                                            "type": "try_statement",
+                                                            "block": {
+                                                                "type": "block",
+                                                                "statements": [
+                                                                    {
+                                                                        "type": "local_variable_declaration",
+                                                                        "type": {
+                                                                            "type": "type_identifier",
+                                                                            "value": "MessageDigest"
+                                                                        },
+                                                                        "declarator": {
+                                                                            "type": "variable_declarator",
+                                                                            "name": "digest",
+                                                                            "initializer": {
+                                                                                "type": "method_invocation",
+                                                                                "object": {
+                                                                                    "type": "identifier",
+                                                                                    "value": "MessageDigest"
+                                                                                },
+                                                                                "name": "getInstance",
+                                                                                "arguments": [
+                                                                                    {
+                                                                                        "type": "string_literal",
+                                                                                        "value": "SHA"
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        "type": "expression_statement",
+                                                                        "expression": {
+                                                                            "type": "method_invocation",
+                                                                            "object": {
+                                                                                "type": "identifier",
+                                                                                "value": "digest"
+                                                                            },
+                                                                            "name": "update",
+                                                                            "arguments": [
+                                                                                {
+                                                                                    "type": "method_invocation",
+                                                                                    "object": {
+                                                                                        "type": "method_invocation",
+                                                                                        "object": {
+                                                                                            "type": "identifier",
+                                                                                            "value": "buf"
+                                                                                        },
+                                                                                        "name": "toString"
+                                                                                    },
+                                                                                    "name": "getBytes"
+                                                                                }
+                                                                            ]
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        "type": "local_variable_declaration",
+                                                                        "type": {
+                                                                            "type": "array_type",
+                                                                            "element_type": {
+                                                                                "type": "primitive_type",
+                                                                                "value": "byte"
+                                                                            }
+                                                                        },
+                                                                        "declarator": {
+                                                                            "type": "variable_declarator",
+                                                                            "name": "data",
+                                                                            "initializer": {
+                                                                                "type": "method_invocation",
+                                                                                "object": {
+                                                                                    "type": "identifier",
+                                                                                    "value": "digest"
+                                                                                },
+                                                                                "name": "digest"
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        "type": "expression_statement",
+                                                                        "expression": {
+                                                                            "type": "assignment",
+                                                                            "operator": "=",
+                                                                            "left": {
+                                                                                "type": "identifier",
+                                                                                "value": "serialNum"
+                                                                            },
+                                                                            "right": {
+                                                                                "type": "method_invocation",
+                                                                                "object": {
+                                                                                    "type": "object_creation_expression",
+                                                                                    "type": {
+                                                                                        "type": "type_identifier",
+                                                                                        "value": "BASE64Encoder"
+                                                                                    }
+                                                                                },
+                                                                                "name": "encode",
+                                                                                "arguments": [
+                                                                                    {
+                                                                                        "type": "identifier",
+                                                                                        "value": "data"
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        }
+                                                                    },
+                                                                    {
+                                                                        "type": "return_statement",
+                                                                        "expression": {
+                                                                            "type": "identifier",
+                                                                            "value": "serialNum"
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "catches": [
+                                                                {
+                                                                    "type": "catch_clause",
+                                                                    "parameter": {
+                                                                        "type": "catch_formal_parameter",
+                                                                        "type": {
+                                                                            "type": "type_identifier",
+                                                                            "value": "NoSuchAlgorithmException"
+                                                                        },
+                                                                        "name": "exp"
+                                                                    },
+                                                                    "body": {
+                                                                        "type": "block",
+                                                                        "statements": [
+                                                                            {
+                                                                                "type": "expression_statement",
+                                                                                "expression": {
+                                                                                    "type": "method_invocation",
+                                                                                    "object": {
+                                                                                        "type": "field_access",
+                                                                                        "object": {
+                                                                                            "type": "field_access",
+                                                                                            "object": {
+                                                                                                "type": "identifier",
+                                                                                                "value": "BootSecurityManager"
+                                                                                            },
+                                                                                            "field": "securityLogger"
+                                                                                        }
+                                                                                    },
+                                                                                    "name": "log",
+                                                                                    "arguments": [
+                                                                                        {
+                                                                                            "type": "field_access",
+                                                                                            "object": {
+                                                                                                "type": "identifier",
+                                                                                                "value": "Level"
+                                                                                            },
+                                                                                            "field": "SEVERE"
+                                                                                        },
+                                                                                        {
+                                                                                            "type": "method_invocation",
+                                                                                            "object": {
+                                                                                                "type": "identifier",
+                                                                                                "value": "exp"
+                                                                                            },
+                                                                                            "name": "getMessage"
+                                                                                        },
+                                                                                        {
+                                                                                            "type": "identifier",
+                                                                                            "value": "exp"
+                                                                                        }
+                                                                                    ]
+                                                                                }
+                                                                            },
+                                                                            {
+                                                                                "type": "return_statement",
+                                                                                "expression": {
+                                                                                    "type": "method_invocation",
+                                                                                    "object": {
+                                                                                        "type": "identifier",
+                                                                                        "value": "buf"
+                                                                                    },
+                                                                                    "name": "toString"
+                                                                                }
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                }
+                                                            ]
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            {
+                "type": "return_statement",
+                "expression": {
+                    "type": "identifier",
+                    "value": "serialNum"
+                }
+            }
+        ]
+    }
+}

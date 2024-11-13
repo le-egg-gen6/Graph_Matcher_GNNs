@@ -1,74 +1,164 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import GCNConv
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, GATConv, GlobalAttention
+from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d, Dropout
 
-class GNNEncoder(nn.Module):
-    def __init__(self, input_dim=768, hidden_dim=256, output_dim=128, edge_dim=3):
-        """
-        Args:
-            input_dim: Dimension of CodeBERT embeddings (default 768)
-            hidden_dim: Hidden dimension for GNN layers
-            output_dim: Output dimension for node embeddings
-            edge_dim: Dimension of edge features
-        """
-        super().__init__()
+
+class GraphEncoder(nn.Module):
+    """
+    Encoder hiệu quả cho GraphMatcher sử dụng kết hợp GCN và GAT
+    với cơ chế attention toàn cục và skip connections.
+    
+    Args:
+        in_channels (int): Số chiều của node features đầu vào
+        hidden_channels (int): Số chiều của hidden layers
+        out_channels (int): Số chiều của embeddings đầu ra
+        num_layers (int): Số lớp GNN
+        dropout (float): Tỉ lệ dropout
+        use_batch_norm (bool): Có sử dụng batch normalization hay không
+    """
+    def __init__(
+        self,
+        in_channels,
+        hidden_channels=128,
+        out_channels=96,
+        num_layers=3,
+        dropout=0.1,
+        use_batch_norm=True
+    ):
+        super(GraphEncoder, self).__init__()
         
-        # Edge feature encoder
-        self.edge_encoder = nn.Sequential(
-            nn.Linear(edge_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim)
+        self.in_channels = in_channels
+        self.hidden_channels = hidden_channels
+        self.out_channels = out_channels
+        self.num_layers = num_layers
+        self.dropout = dropout
+        
+        # Input projection
+        self.input_proj = Lin(in_channels, hidden_channels)
+        
+        # GNN Layers
+        self.convs = nn.ModuleList()
+        self.gats = nn.ModuleList()
+        self.bns = nn.ModuleList()
+        
+        for i in range(num_layers):
+            # GCN layer for structure learning
+            self.convs.append(GCNConv(hidden_channels, hidden_channels))
+            
+            # GAT layer for attention-based message passing
+            self.gats.append(GATConv(
+                hidden_channels, 
+                hidden_channels // 4, 
+                heads=4, 
+                dropout=dropout
+            ))
+            
+            # Batch norm layer
+            if use_batch_norm:
+                self.bns.append(BatchNorm1d(hidden_channels))
+        
+        # Global attention pooling
+        gate_nn = Seq(
+            Lin(hidden_channels, hidden_channels // 2),
+            ReLU(),
+            Lin(hidden_channels // 2, 1)
+        )
+        self.global_attention = GlobalAttention(gate_nn)
+        
+        # Output projection
+        self.output_proj = Seq(
+            Lin(hidden_channels, hidden_channels),
+            ReLU(),
+            BatchNorm1d(hidden_channels),
+            Dropout(dropout),
+            Lin(hidden_channels, out_channels)
         )
         
-        # Dimension reduction for CodeBERT embeddings
-        self.input_projection = nn.Linear(input_dim, hidden_dim)
+        # Node feature augmentation
+        self.node_feature_mlp = Seq(
+            Lin(hidden_channels * 2, hidden_channels),
+            ReLU(),
+            BatchNorm1d(hidden_channels)
+        )
+    
+    def forward(self, x, edge_index, edge_attr=None, batch=None):
+        """
+        Forward pass của encoder
         
-        # GNN layers
-        self.conv1 = GCNConv(hidden_dim, hidden_dim)
-        self.conv2 = GCNConv(hidden_dim, hidden_dim)
-        self.conv3 = GCNConv(hidden_dim, output_dim)
+        Args:
+            x (Tensor): Node features [num_nodes, in_channels]
+            edge_index (LongTensor): Graph connectivity [2, num_edges]
+            edge_attr (Tensor, optional): Edge features [num_edges, num_edge_features]
+            batch (LongTensor, optional): Batch vector [num_nodes]
+            
+        Returns:
+            Tensor: Node embeddings [num_nodes, out_channels]
+        """
+        # Convert input features to float
+        x = x.float()
+        if edge_attr is not None:
+            edge_attr = edge_attr.float()
+            
+        # Initial projection
+        h = self.input_proj(x)
         
-        self.out_channels = output_dim
-        self.attention = nn.Parameter(torch.randn(output_dim))
+        # Store representations từ mỗi layer cho skip connections
+        representations = []
         
-        self.layer_norm1 = nn.LayerNorm(hidden_dim)
-        self.layer_norm2 = nn.LayerNorm(hidden_dim)
-        self.layer_norm3 = nn.LayerNorm(output_dim)
+        # Message passing layers
+        for i in range(self.num_layers):
+            # Combine GCN và GAT
+            h1 = self.convs[i](h, edge_index)
+            h2 = self.gats[i](h, edge_index)
+            
+            # Residual connection
+            h = h + h1 + h2
+            
+            # Batch norm và nonlinearity
+            if hasattr(self, 'bns'):
+                h = self.bns[i](h)
+            h = F.relu(h)
+            
+            # Dropout
+            h = F.dropout(h, p=self.dropout, training=self.training)
+            
+            representations.append(h)
         
-    def forward(self, x, edge_index, edge_attr):
-        # Project CodeBERT embeddings to hidden dimension
-        x = self.input_projection(x)
+        # Skip connections: kết hợp với representation từ layer đầu tiên
+        h_combined = torch.cat([h, representations[0]], dim=-1)
+        h = self.node_feature_mlp(h_combined)
         
-        # Encode edge features
-        edge_features = self.edge_encoder(edge_attr)
+        # Global attention pooling nếu cần
+        if batch is not None:
+            h_graph = self.global_attention(h, batch)
+            # Broadcast graph-level features back to nodes
+            h = h + h_graph[batch]
         
-        # Graph convolutions with edge features and residual connections
-        x1 = self.conv1(x, edge_index)
-        x1 = x1 + torch.index_select(edge_features, 0, edge_index[0])
-        x1 = self.layer_norm1(x1)
-        x1 = torch.relu(x1 + x)
+        # Output projection
+        out = self.output_proj(h)
         
-        x2 = self.conv2(x1, edge_index)
-        x2 = x2 + torch.index_select(edge_features, 0, edge_index[0])
-        x2 = self.layer_norm2(x2)
-        x2 = torch.relu(x2 + x1)
-        
-        x3 = self.conv3(x2, edge_index)
-        x3 = x3 + torch.index_select(edge_features, 0, edge_index[0])
-        x3 = self.layer_norm3(x3)
-        
-        # Apply attention
-        attention_weights = torch.softmax(torch.matmul(x3, self.attention), dim=0)
-        x3 = x3 * attention_weights.unsqueeze(-1)
-        
-        return x3
+        return out
     
     def reset_parameters(self):
-        for layer in self.edge_encoder:
+        """Reset tất cả parameters về initialization values"""
+        for conv in self.convs:
+            conv.reset_parameters()
+        for gat in self.gats:
+            gat.reset_parameters()
+        if hasattr(self, 'bns'):
+            for bn in self.bns:
+                bn.reset_parameters()
+                
+        self.input_proj.reset_parameters()
+        self.global_attention.reset_parameters()
+        
+        # Reset MLPs
+        for layer in self.output_proj:
             if hasattr(layer, 'reset_parameters'):
                 layer.reset_parameters()
-        self.input_projection.reset_parameters()
-        self.conv1.reset_parameters()
-        self.conv2.reset_parameters()
-        self.conv3.reset_parameters()
-        nn.init.normal_(self.attention)
+        
+        for layer in self.node_feature_mlp:
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()

@@ -92,26 +92,30 @@ class GraphMatcher(nn.Module):
 
         Returns: A joint embedding vector for Gs, Gt of shape `[bsz * gembd_vec_dim]`
         """
-        h_s = self.psi_1(x_s, edge_index_s, edge_attr_s)
-        h_t = self.psi_1(x_t, edge_index_t, edge_attr_t)
-        h_s, h_t = (h_s.detach(), h_t.detach()) if self.detach else (h_s, h_t)
-        h_s, s_mask = to_dense_batch(h_s, batch_s, fill_value=0)
-        h_t, t_mask = to_dense_batch(h_t, batch_t, fill_value=0)    # [64, 50, 48] or [bsz, Vt, dim]
-        assert h_s.size(0) == h_t.size(0), 'Encountered unequal batch-sizes'
+        try:
+            h_s = self.psi_1(x_s, edge_index_s, edge_attr_s)
+            h_t = self.psi_1(x_t, edge_index_t, edge_attr_t)
+            h_s, h_t = (h_s.detach(), h_t.detach()) if self.detach else (h_s, h_t)
+            h_s, s_mask = to_dense_batch(h_s, batch_s, fill_value=0)
+            h_t, t_mask = to_dense_batch(h_t, batch_t, fill_value=0)    # [64, 50, 48] or [bsz, Vt, dim]
+            assert h_s.size(0) == h_t.size(0), 'Encountered unequal batch-sizes'
 
-        (B, N_s, C_out), N_t = h_s.size(), h_t.size(1)
-        S_hat = h_s @ h_t.transpose(-1, -2)
-        # Use S_hat to map any node func in L(Gs) -> L(Gt)
-        S_mask = s_mask.view(B, N_s, 1) & t_mask.view(B, 1, N_t)
-        S_0 = masked_softmax(S_hat, S_mask)  # [64, 17, 50]
-        r_s = S_0 @ h_t
-        h_st = torch.cat((h_s, r_s), dim=2)
-        # --------------------------------------------------------- #
-        if self.aggregation == 'mean':
-            h_st = torch.mean(h_st, dim=1).squeeze()
-        out = self.mlp(h_st)
+            (B, N_s, C_out), N_t = h_s.size(), h_t.size(1)
+            S_hat = h_s @ h_t.transpose(-1, -2)
+            # Use S_hat to map any node func in L(Gs) -> L(Gt)
+            S_mask = s_mask.view(B, N_s, 1) & t_mask.view(B, 1, N_t)
+            S_0 = masked_softmax(S_hat, S_mask)  # [64, 17, 50]
+            r_s = S_0 @ h_t
+            h_st = torch.cat((h_s, r_s), dim=2)
+            # --------------------------------------------------------- #
+            if self.aggregation == 'mean':
+                h_st = torch.mean(h_st, dim=1).squeeze()
+            out = self.mlp(h_st)
 
-        return out, S_0
+            return out, S_0
+        except Exception as e:
+            print(f"Error in matcher: {e}")
+            raise
 
     def reset(self, nn):
         def _reset(item):
